@@ -1,0 +1,12 @@
+{
+  "domain": "renpho_health",
+  "name": "Renpho Health",
+  "codeowners": ["@StartupBros"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/StartupBros/hass-renpho-health",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/StartupBros/hass-renpho-health/issues",
+  "requirements": ["pycryptodome>=3.20.0"],
+  "version": "1.0.0"
+}

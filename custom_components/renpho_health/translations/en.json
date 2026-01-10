@@ -1,0 +1,65 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Renpho Health",
+        "description": "Enter your Renpho Health app credentials. This integration uses the Renpho Health API and will not log you out of the mobile app.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "refresh_interval": "Update interval (seconds)"
+        },
+        "data_description": {
+          "refresh_interval": "How often to fetch new data (minimum 300 seconds)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This account is already configured"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "weight": {
+        "name": "Weight"
+      },
+      "bmi": {
+        "name": "BMI"
+      },
+      "body_fat": {
+        "name": "Body Fat"
+      },
+      "muscle_mass": {
+        "name": "Muscle Mass"
+      },
+      "water": {
+        "name": "Body Water"
+      },
+      "bone_mass": {
+        "name": "Bone Mass"
+      },
+      "bmr": {
+        "name": "Basal Metabolic Rate"
+      },
+      "visceral_fat": {
+        "name": "Visceral Fat"
+      },
+      "body_age": {
+        "name": "Body Age"
+      },
+      "protein": {
+        "name": "Protein"
+      },
+      "subcutaneous_fat": {
+        "name": "Subcutaneous Fat"
+      },
+      "skeletal_muscle": {
+        "name": "Skeletal Muscle"
+      }
+    }
+  }
+}
