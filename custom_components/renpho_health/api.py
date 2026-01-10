@@ -1,18 +1,23 @@
 """Renpho Health API client."""
 from __future__ import annotations
 
-import hashlib
+import io
+import json
+import logging
 import re
 from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+import aiohttp
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-import aiohttp
+import zstandard as zstd
 
 from .const import API_BASE, ENCRYPTION_SECRET
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -119,8 +124,54 @@ class RenphoHealthApi:
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            # Request only gzip/deflate, not zstd which causes issues
+            headers = {"Accept-Encoding": "gzip, deflate"}
+            self._session = aiohttp.ClientSession(headers=headers)
         return self._session
+
+    async def _parse_response(self, response: aiohttp.ClientResponse) -> dict[str, Any]:
+        """Parse response, handling zstd compression if present."""
+        content_encoding = response.headers.get("Content-Encoding", "").lower()
+        raw_data = await response.read()
+
+        _LOGGER.debug(
+            "Response status=%d, encoding='%s', size=%d, first_bytes=%s",
+            response.status,
+            content_encoding,
+            len(raw_data),
+            raw_data[:20].hex() if raw_data else "empty",
+        )
+
+        # Check for zstd magic bytes (0x28, 0xB5, 0x2F, 0xFD)
+        is_zstd_data = len(raw_data) >= 4 and raw_data[:4] == b'\x28\xb5\x2f\xfd'
+
+        if content_encoding == "zstd" or is_zstd_data:
+            try:
+                # Use streaming decompression to handle all frames
+                decompressor = zstd.ZstdDecompressor()
+                with decompressor.stream_reader(io.BytesIO(raw_data)) as reader:
+                    decompressed = reader.read()
+                decoded = decompressed.decode("utf-8")
+                _LOGGER.debug("zstd decompression successful, size: %d, content: %.200s", len(decoded), decoded)
+                return json.loads(decoded)
+            except zstd.ZstdError as err:
+                _LOGGER.warning("zstd decompression failed: %s", err)
+                # Fall through to try raw JSON
+            except json.JSONDecodeError as err:
+                _LOGGER.error("zstd decompressed but invalid JSON: %s, content: %.500s", err, decoded[:500])
+                raise
+
+        # Try parsing as regular JSON
+        try:
+            return json.loads(raw_data.decode("utf-8"))
+        except json.JSONDecodeError as err:
+            _LOGGER.error(
+                "Failed to parse response (status %d, encoding=%s): %s",
+                response.status,
+                content_encoding,
+                raw_data[:500],
+            )
+            raise
 
     async def close(self) -> None:
         """Close the API client session."""
@@ -130,8 +181,6 @@ class RenphoHealthApi:
 
     async def authenticate(self) -> None:
         """Authenticate with Renpho Health API."""
-        import json
-
         session = await self._get_session()
 
         login_data = {
@@ -153,7 +202,7 @@ class RenphoHealthApi:
             json={"encryptData": self._encrypt(json.dumps(login_data))},
             headers={"Content-Type": "application/json"},
         ) as response:
-            result = await response.json()
+            result = await self._parse_response(response)
 
         if result.get("code") != 101:
             raise RenphoAuthError(f"Authentication failed: {result.get('msg', 'Unknown error')}")
@@ -180,8 +229,6 @@ class RenphoHealthApi:
 
     async def _get_device_info(self) -> None:
         """Get device info to determine measurement table."""
-        import json
-
         session = await self._get_session()
 
         async with session.post(
@@ -195,7 +242,7 @@ class RenphoHealthApi:
                 "platform": "android",
             },
         ) as response:
-            result = await response.json()
+            result = await self._parse_response(response)
 
         if result.get("code") != 101:
             raise RenphoApiError(f"Failed to get device info: {result.get('msg')}")
@@ -232,8 +279,6 @@ class RenphoHealthApi:
 
     async def get_measurements(self, limit: int = 100) -> list[RenphoMeasurement]:
         """Get measurements from the API."""
-        import json
-
         await self._ensure_authenticated()
         session = await self._get_session()
 
@@ -255,7 +300,7 @@ class RenphoHealthApi:
                 "platform": "android",
             },
         ) as response:
-            result = await response.json()
+            result = await self._parse_response(response)
 
         if result.get("code") != 101:
             raise RenphoApiError(f"Failed to get measurements: {result.get('msg')}")
