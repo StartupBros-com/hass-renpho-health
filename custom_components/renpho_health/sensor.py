@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfMass
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -158,13 +159,13 @@ class RenphoHealthSensor(CoordinatorEntity[RenphoHealthCoordinator], SensorEntit
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Renpho Health Scale",
-            "manufacturer": "Renpho",
-            "model": "Smart Scale",
-            "entry_type": "service",
-        }
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name="Renpho Health Scale",
+            manufacturer="Renpho",
+            model="Smart Scale",
+            entry_type=DeviceEntryType.SERVICE,
+        )
 
     @property
     def native_value(self) -> Any:
@@ -185,3 +186,13 @@ class RenphoHealthSensor(CoordinatorEntity[RenphoHealthCoordinator], SensorEntit
             and self.entity_description.value_key in self.coordinator.data
             and self.coordinator.data[self.entity_description.value_key] is not None
         )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional state attributes."""
+        if not self.coordinator.data:
+            return None
+        last_updated = self.coordinator.data.get("last_updated")
+        if last_updated:
+            return {"measurement_time": last_updated.isoformat()}
+        return None

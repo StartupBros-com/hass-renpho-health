@@ -47,8 +47,11 @@ class RenphoHealthCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the API."""
         try:
+            _LOGGER.debug("Fetching Renpho Health data...")
             self._user = await self.api.get_user()
+            _LOGGER.debug("Got user: %s", self._user)
             self._latest_measurement = await self.api.get_latest_measurement()
+            _LOGGER.debug("Got measurement: %s", self._latest_measurement)
 
             if not self._latest_measurement:
                 _LOGGER.warning("No measurements found for Renpho Health")
@@ -72,4 +75,8 @@ class RenphoHealthCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "last_updated": m.datetime,
             }
         except RenphoApiError as err:
+            _LOGGER.error("Renpho API error: %s", err)
             raise UpdateFailed(f"Error fetching Renpho data: {err}") from err
+        except Exception as err:
+            _LOGGER.exception("Unexpected error fetching Renpho data: %s", err)
+            raise UpdateFailed(f"Unexpected error: {err}") from err
