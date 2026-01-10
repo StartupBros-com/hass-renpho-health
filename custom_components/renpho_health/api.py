@@ -260,9 +260,9 @@ class RenphoHealthApi:
         user_ids = self._extract_user_ids(raw_data)
         self._scale_user_id = user_ids[0] if user_ids else str(scale_info["userIds"][0])
 
-    async def _ensure_authenticated(self) -> None:
+    async def _ensure_authenticated(self, force: bool = False) -> None:
         """Ensure we have valid authentication."""
-        if not self._token:
+        if force or not self._token:
             await self.authenticate()
 
     async def get_user(self) -> RenphoUser:
@@ -277,7 +277,7 @@ class RenphoHealthApi:
         measurements = await self.get_measurements(limit=1000)
         return measurements[0] if measurements else None
 
-    async def get_measurements(self, limit: int = 100) -> list[RenphoMeasurement]:
+    async def get_measurements(self, limit: int = 100, _retry: bool = True) -> list[RenphoMeasurement]:
         """Get measurements from the API."""
         await self._ensure_authenticated()
         session = await self._get_session()
@@ -288,6 +288,10 @@ class RenphoHealthApi:
             "userIds": [self._scale_user_id],
             "tableName": self._table_name,
         }
+        _LOGGER.debug(
+            "Requesting measurements: userId=%s, scaleUserId=%s, tableName=%s",
+            self._user_id, self._scale_user_id, self._table_name
+        )
 
         async with session.post(
             f"{API_BASE}/RenphoHealth/scale/queryAllMeasureDataList",
@@ -302,8 +306,14 @@ class RenphoHealthApi:
         ) as response:
             result = await self._parse_response(response)
 
+        _LOGGER.debug("Measurements API response: code=%s, msg=%s", result.get("code"), result.get("msg"))
         if result.get("code") != 101:
-            raise RenphoApiError(f"Failed to get measurements: {result.get('msg')}")
+            # Token may have expired - try re-authenticating once
+            if _retry:
+                _LOGGER.warning("Measurements request failed (code=%s), re-authenticating and retrying", result.get("code"))
+                await self._ensure_authenticated(force=True)
+                return await self.get_measurements(limit=limit, _retry=False)
+            raise RenphoApiError(f"Failed to get measurements: code={result.get('code')}, msg={result.get('msg')}")
 
         raw_measurements = json.loads(self._decrypt(result["data"]))
 
