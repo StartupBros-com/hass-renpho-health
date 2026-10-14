@@ -95,12 +95,7 @@ class RenphoHealthApi:
 
     def _encrypt_empty(self) -> str:
         """Encrypt empty bytes for endpoints that require it."""
-        cipher = AES.new(
-            ENCRYPTION_SECRET.encode("utf-8"),
-            AES.MODE_ECB
-        )
-        encrypted = cipher.encrypt(pad(b"", AES.block_size))
-        return b64encode(encrypted).decode("utf-8")
+        return self._encrypt("")
 
     def _decrypt(self, encrypted_content: str) -> str:
         """Decrypt content using AES-128-ECB."""
