@@ -5,11 +5,10 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 
-from .api import RenphoHealthApi, RenphoAuthError
+from .api import RenphoAuthError, RenphoHealthApi
 from .const import CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
