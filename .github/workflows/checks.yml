@@ -1,0 +1,50 @@
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.11.14"
+            requirements: tests/requirements-min.txt
+          - python: "3.13.11"
+            requirements: tests/requirements.txt
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install uv
+        run: pipx install uv==0.9.20
+      - name: Install independent dependency lane
+        run: |
+          uv venv --python '${{ matrix.python }}' .venv
+          uv pip install --python .venv/bin/python -r '${{ matrix.requirements }}'
+      - name: Tests and byte compilation
+        run: |
+          .venv/bin/python -c "import sys; from homeassistant.const import __version__; print(sys.version); print('Home Assistant', __version__)"
+          .venv/bin/python -m pytest -q
+          .venv/bin/python -m compileall -q custom_components tests
+      - name: Lint and types
+        if: matrix.python == '3.13.11'
+        run: |
+          .venv/bin/ruff check custom_components tests
+          .venv/bin/mypy --follow-imports=silent custom_components/renpho_health
+      - run: git diff --check
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361

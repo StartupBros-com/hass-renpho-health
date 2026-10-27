@@ -1,4 +1,5 @@
 """DataUpdateCoordinator for Renpho Health."""
+
 from __future__ import annotations
 
 import logging
@@ -49,9 +50,9 @@ class RenphoHealthCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             _LOGGER.debug("Fetching Renpho Health data...")
             self._user = await self.api.get_user()
-            _LOGGER.debug("Got user: %s", self._user)
+            _LOGGER.debug("User fetch completed")
             self._latest_measurement = await self.api.get_latest_measurement()
-            _LOGGER.debug("Got measurement: %s", self._latest_measurement)
+            _LOGGER.debug("Measurement fetch completed")
 
             if not self._latest_measurement:
                 _LOGGER.warning("No measurements found for Renpho Health")
@@ -74,9 +75,9 @@ class RenphoHealthCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "heart_rate": m.heart_rate,
                 "last_updated": m.datetime,
             }
-        except RenphoApiError as err:
-            _LOGGER.error("Renpho API error: %s", err)
-            raise UpdateFailed(f"Error fetching Renpho data: {err}") from err
-        except Exception as err:
-            _LOGGER.exception("Unexpected error fetching Renpho data")
-            raise UpdateFailed(f"Unexpected error: {err}") from err
+        except RenphoApiError:
+            _LOGGER.error("Renpho API request failed")
+            raise UpdateFailed("Error fetching Renpho data") from None
+        except Exception:  # noqa: BLE001 - sanitize all payload-bearing failures at this boundary.
+            _LOGGER.error("Unexpected error fetching Renpho data")
+            raise UpdateFailed("Unexpected error fetching Renpho data") from None

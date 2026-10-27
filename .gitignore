@@ -33,3 +33,8 @@ htmlcov/
 .HA_VERSION
 home-assistant.log
 home-assistant_v2.db
+
+# Local validation environments and caches
+.venv-min/
+.mypy_cache/
+.ruff_cache/

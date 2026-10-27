@@ -1,4 +1,5 @@
 """The Renpho Health integration."""
+
 from __future__ import annotations
 
 import logging
@@ -23,18 +24,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data[CONF_PASSWORD],
     )
 
-    coordinator = RenphoHealthCoordinator(
-        hass,
-        api,
-        entry.data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
-    )
-
-    await coordinator.async_config_entry_first_refresh()
-
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    coordinator = None
+    previous = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    try:
+        coordinator = RenphoHealthCoordinator(
+            hass, api, entry.data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL)
+        )
+        await coordinator.async_config_entry_first_refresh()
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except BaseException:
+        # Cancellation also releases this client's privately owned session.
+        state = hass.data.get(DOMAIN, {})
+        if coordinator is not None and state.get(entry.entry_id) is coordinator:
+            if previous is None:
+                state.pop(entry.entry_id)
+            else:
+                state[entry.entry_id] = previous
+        await api.close()
+        raise
 
     return True
 
