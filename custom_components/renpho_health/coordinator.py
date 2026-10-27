@@ -1,14 +1,14 @@
 """DataUpdateCoordinator for Renpho Health."""
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import RenphoHealthApi, RenphoApiError, RenphoMeasurement, RenphoUser
+from .api import RenphoApiError, RenphoHealthApi, RenphoMeasurement, RenphoUser
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,5 +78,5 @@ class RenphoHealthCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Renpho API error: %s", err)
             raise UpdateFailed(f"Error fetching Renpho data: {err}") from err
         except Exception as err:
-            _LOGGER.exception("Unexpected error fetching Renpho data: %s", err)
+            _LOGGER.exception("Unexpected error fetching Renpho data")
             raise UpdateFailed(f"Unexpected error: {err}") from err

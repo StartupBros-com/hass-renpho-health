@@ -1,19 +1,21 @@
 """Renpho Health API client."""
 from __future__ import annotations
 
+import gzip
 import io
 import json
 import logging
 import re
+import zlib
 from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 import aiohttp
+import zstandard as zstd
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-import zstandard as zstd
 
 from .const import API_BASE, ENCRYPTION_SECRET
 
@@ -121,16 +123,30 @@ class RenphoHealthApi:
         match = re.search(r'"userIds":\[(\d+(?:,\d+)*)\]', json_str)
         return match.group(1).split(",") if match else []
 
+    def _request_headers(self, *, authenticated: bool = False) -> dict[str, str]:
+        """Build protocol headers, validating identity for authenticated requests."""
+        headers = {
+            "Content-Type": "application/json",
+            "appVersion": "7.0.0",
+            "platform": "android",
+        }
+        if authenticated:
+            if self._token is None or self._user_id is None:
+                raise RenphoAuthError("Authentication required for request headers")
+            headers["token"] = self._token
+            headers["userId"] = self._user_id
+        return headers
+
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
         if self._session is None or self._session.closed:
-            # Request only gzip/deflate, not zstd which causes issues
+            # Advertise gzip/deflate; the parser also handles unsolicited zstd.
             headers = {"Accept-Encoding": "gzip, deflate"}
-            self._session = aiohttp.ClientSession(headers=headers)
+            self._session = aiohttp.ClientSession(headers=headers, auto_decompress=False)
         return self._session
 
     async def _parse_response(self, response: aiohttp.ClientResponse) -> dict[str, Any]:
-        """Parse response, handling zstd compression if present."""
+        """Parse raw response bytes, owning all advertised decompression."""
         content_encoding = response.headers.get("Content-Encoding", "").lower()
         raw_data = await response.read()
 
@@ -141,6 +157,14 @@ class RenphoHealthApi:
             len(raw_data),
             raw_data[:20].hex() if raw_data else "empty",
         )
+
+        if content_encoding == "gzip":
+            raw_data = gzip.decompress(raw_data)
+        elif content_encoding == "deflate":
+            try:
+                raw_data = zlib.decompress(raw_data)
+            except zlib.error:
+                raw_data = zlib.decompress(raw_data, -zlib.MAX_WBITS)
 
         # Check for zstd magic bytes (0x28, 0xB5, 0x2F, 0xFD)
         is_zstd_data = len(raw_data) >= 4 and raw_data[:4] == b'\x28\xb5\x2f\xfd'
@@ -164,7 +188,7 @@ class RenphoHealthApi:
         # Try parsing as regular JSON
         try:
             return json.loads(raw_data.decode("utf-8"))
-        except json.JSONDecodeError as err:
+        except json.JSONDecodeError:
             _LOGGER.error(
                 "Failed to parse response (status %d, encoding=%s): %s",
                 response.status,
@@ -200,7 +224,7 @@ class RenphoHealthApi:
         async with session.post(
             f"{API_BASE}/renpho-aggregation/user/login",
             json={"encryptData": self._encrypt(json.dumps(login_data))},
-            headers={"Content-Type": "application/json"},
+            headers=self._request_headers(),
         ) as response:
             result = await self._parse_response(response)
 
@@ -234,13 +258,7 @@ class RenphoHealthApi:
         async with session.post(
             f"{API_BASE}/renpho-aggregation/device/count",
             json={"encryptData": self._encrypt_empty()},
-            headers={
-                "Content-Type": "application/json",
-                "token": self._token,
-                "userId": self._user_id,
-                "appVersion": "7.0.0",
-                "platform": "android",
-            },
+            headers=self._request_headers(authenticated=True),
         ) as response:
             result = await self._parse_response(response)
 
@@ -296,13 +314,7 @@ class RenphoHealthApi:
         async with session.post(
             f"{API_BASE}/RenphoHealth/scale/queryAllMeasureDataList",
             json={"encryptData": self._encrypt(json.dumps(request_data))},
-            headers={
-                "Content-Type": "application/json",
-                "token": self._token,
-                "userId": self._user_id,
-                "appVersion": "7.0.0",
-                "platform": "android",
-            },
+            headers=self._request_headers(authenticated=True),
         ) as response:
             result = await self._parse_response(response)
 

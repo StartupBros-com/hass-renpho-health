@@ -1,0 +1,9 @@
+# Tested with Python 3.13.11; Home Assistant is imported directly by the tests.
+homeassistant==2026.2.3
+aiohttp==3.13.3
+pycryptodome==4.2.0
+zstandard==0.25.0
+pytest==9.1.1
+pytest-asyncio==1.4.1
+ruff==0.17.3
+mypy==2.4.0
