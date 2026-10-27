@@ -1,0 +1,6 @@
+# Independent minimum lane: HA controls aiohttp and its other dependencies.
+homeassistant==2024.1.0
+pycryptodome==4.2.0
+zstandard==0.25.0
+pytest==9.1.1
+pytest-asyncio==1.4.1

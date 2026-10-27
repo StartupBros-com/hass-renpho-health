@@ -1,4 +1,5 @@
 """Renpho Health API client."""
+
 from __future__ import annotations
 
 import gzip
@@ -8,9 +9,11 @@ import logging
 import re
 import zlib
 from base64 import b64decode, b64encode
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
+from functools import wraps
+from typing import Any, ParamSpec, TypeVar
 
 import aiohttp
 import zstandard as zstd
@@ -57,7 +60,7 @@ class RenphoMeasurement:
     @property
     def datetime(self) -> datetime:
         """Return measurement datetime."""
-        return datetime.fromtimestamp(self.timestamp)
+        return datetime.fromtimestamp(self.timestamp, UTC)
 
 
 class RenphoApiError(Exception):
@@ -66,6 +69,33 @@ class RenphoApiError(Exception):
 
 class RenphoAuthError(RenphoApiError):
     """Renpho authentication error."""
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def _safe_errors(method: Callable[_P, Awaitable[_T]]) -> Callable[_P, Awaitable[_T]]:
+    """Keep transport, decoding and schema exception payloads inside the client."""
+
+    @wraps(method)
+    async def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        try:
+            return await method(*args, **kwargs)
+        except RenphoApiError:
+            raise
+        except Exception:  # noqa: BLE001 - sanitize all payload-bearing failures at this boundary.
+            raise RenphoApiError(
+                "Renpho request or response processing failed"
+            ) from None
+
+    return wrapped
+
+
+def _safe_code(result: dict[str, Any]) -> int | None:
+    """Only bounded JSON integers are suitable for provider-code metadata."""
+    code = result.get("code")
+    return code if type(code) is int and -(2**31) <= code < 2**31 else None
 
 
 class RenphoHealthApi:
@@ -87,29 +117,20 @@ class RenphoHealthApi:
 
     def _encrypt(self, content: str) -> str:
         """Encrypt content using AES-128-ECB."""
-        cipher = AES.new(
-            ENCRYPTION_SECRET.encode("utf-8"),
-            AES.MODE_ECB
-        )
+        cipher = AES.new(ENCRYPTION_SECRET.encode("utf-8"), AES.MODE_ECB)
         padded = pad(content.encode("utf-8"), AES.block_size)
         encrypted = cipher.encrypt(padded)
         return b64encode(encrypted).decode("utf-8")
 
     def _encrypt_empty(self) -> str:
         """Encrypt empty bytes for endpoints that require it."""
-        cipher = AES.new(
-            ENCRYPTION_SECRET.encode("utf-8"),
-            AES.MODE_ECB
-        )
+        cipher = AES.new(ENCRYPTION_SECRET.encode("utf-8"), AES.MODE_ECB)
         encrypted = cipher.encrypt(pad(b"", AES.block_size))
         return b64encode(encrypted).decode("utf-8")
 
     def _decrypt(self, encrypted_content: str) -> str:
         """Decrypt content using AES-128-ECB."""
-        cipher = AES.new(
-            ENCRYPTION_SECRET.encode("utf-8"),
-            AES.MODE_ECB
-        )
+        cipher = AES.new(ENCRYPTION_SECRET.encode("utf-8"), AES.MODE_ECB)
         decrypted = cipher.decrypt(b64decode(encrypted_content))
         return unpad(decrypted, AES.block_size).decode("utf-8")
 
@@ -142,22 +163,28 @@ class RenphoHealthApi:
         if self._session is None or self._session.closed:
             # Advertise gzip/deflate; the parser also handles unsolicited zstd.
             headers = {"Accept-Encoding": "gzip, deflate"}
-            self._session = aiohttp.ClientSession(headers=headers, auto_decompress=False)
+            self._session = aiohttp.ClientSession(
+                headers=headers, auto_decompress=False
+            )
         return self._session
 
+    @_safe_errors
     async def _parse_response(self, response: aiohttp.ClientResponse) -> dict[str, Any]:
         """Parse raw response bytes, owning all advertised decompression."""
         content_encoding = response.headers.get("Content-Encoding", "").lower()
         raw_data = await response.read()
 
-        _LOGGER.debug(
-            "Response status=%d, encoding='%s', size=%d, first_bytes=%s",
-            response.status,
-            content_encoding,
-            len(raw_data),
-            raw_data[:20].hex() if raw_data else "empty",
+        encoding = (
+            content_encoding
+            if content_encoding in {"gzip", "deflate", "zstd", ""}
+            else "unknown"
         )
-
+        _LOGGER.debug(
+            "Response status=%d, encoding=%s, size=%d",
+            response.status,
+            encoding,
+            len(raw_data),
+        )
         if content_encoding == "gzip":
             raw_data = gzip.decompress(raw_data)
         elif content_encoding == "deflate":
@@ -165,37 +192,18 @@ class RenphoHealthApi:
                 raw_data = zlib.decompress(raw_data)
             except zlib.error:
                 raw_data = zlib.decompress(raw_data, -zlib.MAX_WBITS)
-
-        # Check for zstd magic bytes (0x28, 0xB5, 0x2F, 0xFD)
-        is_zstd_data = len(raw_data) >= 4 and raw_data[:4] == b'\x28\xb5\x2f\xfd'
-
-        if content_encoding == "zstd" or is_zstd_data:
+        if content_encoding == "zstd" or raw_data.startswith(b"\x28\xb5\x2f\xfd"):
             try:
-                # Use streaming decompression to handle all frames
-                decompressor = zstd.ZstdDecompressor()
-                with decompressor.stream_reader(io.BytesIO(raw_data)) as reader:
-                    decompressed = reader.read()
-                decoded = decompressed.decode("utf-8")
-                _LOGGER.debug("zstd decompression successful, size: %d, content: %.200s", len(decoded), decoded)
-                return json.loads(decoded)
-            except zstd.ZstdError as err:
-                _LOGGER.warning("zstd decompression failed: %s", err)
-                # Fall through to try raw JSON
-            except json.JSONDecodeError as err:
-                _LOGGER.error("zstd decompressed but invalid JSON: %s, content: %.500s", err, decoded[:500])
-                raise
-
-        # Try parsing as regular JSON
-        try:
-            return json.loads(raw_data.decode("utf-8"))
-        except json.JSONDecodeError:
-            _LOGGER.error(
-                "Failed to parse response (status %d, encoding=%s): %s",
-                response.status,
-                content_encoding,
-                raw_data[:500],
-            )
-            raise
+                with zstd.ZstdDecompressor().stream_reader(io.BytesIO(raw_data)) as reader:
+                    raw_data = reader.read()
+                _LOGGER.debug("zstd decompression successful, size=%d", len(raw_data))
+            except zstd.ZstdError:
+                # Preserve plain-JSON fallback for incorrectly labelled responses.
+                _LOGGER.warning("zstd decompression failed; trying raw JSON")
+        result = json.loads(raw_data.decode("utf-8"))
+        if not isinstance(result, dict):
+            raise RenphoApiError("Invalid Renpho response envelope")
+        return result
 
     async def close(self) -> None:
         """Close the API client session."""
@@ -203,6 +211,7 @@ class RenphoHealthApi:
             await self._session.close()
             self._session = None
 
+    @_safe_errors
     async def authenticate(self) -> None:
         """Authenticate with Renpho Health API."""
         session = await self._get_session()
@@ -229,7 +238,9 @@ class RenphoHealthApi:
             result = await self._parse_response(response)
 
         if result.get("code") != 101:
-            raise RenphoAuthError(f"Authentication failed: {result.get('msg', 'Unknown error')}")
+            raise RenphoAuthError(
+                f"Invalid credentials or authentication rejected (code={_safe_code(result)})"
+            )
 
         raw_data = self._decrypt(result["data"])
         data = json.loads(raw_data)
@@ -251,6 +262,7 @@ class RenphoHealthApi:
         # Get device info for table name
         await self._get_device_info()
 
+    @_safe_errors
     async def _get_device_info(self) -> None:
         """Get device info to determine measurement table."""
         session = await self._get_session()
@@ -263,7 +275,9 @@ class RenphoHealthApi:
             result = await self._parse_response(response)
 
         if result.get("code") != 101:
-            raise RenphoApiError(f"Failed to get device info: {result.get('msg')}")
+            raise RenphoApiError(
+                f"Failed to get device info (code={_safe_code(result)})"
+            )
 
         raw_data = self._decrypt(result["data"])
         data = json.loads(raw_data)
@@ -283,6 +297,7 @@ class RenphoHealthApi:
         if force or not self._token:
             await self.authenticate()
 
+    @_safe_errors
     async def get_user(self) -> RenphoUser:
         """Get the current user."""
         await self._ensure_authenticated()
@@ -290,12 +305,16 @@ class RenphoHealthApi:
             raise RenphoApiError("User not available")
         return self._user
 
+    @_safe_errors
     async def get_latest_measurement(self) -> RenphoMeasurement | None:
         """Get the most recent measurement."""
         measurements = await self.get_measurements(limit=1000)
         return measurements[0] if measurements else None
 
-    async def get_measurements(self, limit: int = 100, _retry: bool = True) -> list[RenphoMeasurement]:
+    @_safe_errors
+    async def get_measurements(
+        self, limit: int = 100, _retry: bool = True
+    ) -> list[RenphoMeasurement]:
         """Get measurements from the API."""
         await self._ensure_authenticated()
         session = await self._get_session()
@@ -306,10 +325,7 @@ class RenphoHealthApi:
             "userIds": [self._scale_user_id],
             "tableName": self._table_name,
         }
-        _LOGGER.debug(
-            "Requesting measurements: userId=%s, scaleUserId=%s, tableName=%s",
-            self._user_id, self._scale_user_id, self._table_name
-        )
+        _LOGGER.debug("Requesting measurements")
 
         async with session.post(
             f"{API_BASE}/RenphoHealth/scale/queryAllMeasureDataList",
@@ -318,14 +334,19 @@ class RenphoHealthApi:
         ) as response:
             result = await self._parse_response(response)
 
-        _LOGGER.debug("Measurements API response: code=%s, msg=%s", result.get("code"), result.get("msg"))
+        _LOGGER.debug("Measurements API response: code=%s", _safe_code(result))
         if result.get("code") != 101:
             # Token may have expired - try re-authenticating once
             if _retry:
-                _LOGGER.warning("Measurements request failed (code=%s), re-authenticating and retrying", result.get("code"))
+                _LOGGER.warning(
+                    "Measurements request failed (code=%s), re-authenticating and retrying",
+                    _safe_code(result),
+                )
                 await self._ensure_authenticated(force=True)
                 return await self.get_measurements(limit=limit, _retry=False)
-            raise RenphoApiError(f"Failed to get measurements: code={result.get('code')}, msg={result.get('msg')}")
+            raise RenphoApiError(
+                f"Failed to get measurements (code={_safe_code(result)})"
+            )
 
         raw_measurements = json.loads(self._decrypt(result["data"]))
 

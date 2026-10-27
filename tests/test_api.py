@@ -116,7 +116,9 @@ class RenphoServer:
             body = zstd.ZstdCompressor().compress(body)
         if self.encoding not in {"plain", "unlabelled-zstd"}:
             headers["Content-Encoding"] = (
-                "deflate" if self.encoding == "raw-deflate" else self.encoding
+                "deflate"
+                if self.encoding == "raw-deflate"
+                else "zstd" if self.encoding == "mislabelled-zstd" else self.encoding
             )
         return web.Response(body=body, headers=headers, content_type="application/json")
 
@@ -162,7 +164,8 @@ async def test_setup_validation_sends_protocol_headers_and_unchanged_payload(cli
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "encoding", ["plain", "gzip", "deflate", "raw-deflate", "zstd", "unlabelled-zstd"]
+    "encoding",
+    ["plain", "gzip", "deflate", "raw-deflate", "zstd", "unlabelled-zstd", "mislabelled-zstd"],
 )
 async def test_initial_refresh_authenticates_and_loads_latest_measurement(
     client, encoding
@@ -250,3 +253,99 @@ def test_authenticated_headers_require_session_fields(token, user_id):
     api._user_id = user_id
     with pytest.raises(RenphoAuthError, match="Authentication required"):
         api._request_headers(authenticated=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoding", ["plain", "zstd"])
+async def test_successful_api_fetch_does_not_log_account_or_health_data(
+    monkeypatch, caplog, encoding
+):
+    """Canary strategy adapted conceptually from MIT renpho-mcp-server."""
+    import logging
+
+    secret = "CANARY_SUCCESS_3b8c_account_health"
+    api = RenphoHealthApi("fixture", "fixture")
+    caplog.set_level(logging.DEBUG, logger="custom_components.renpho_health")
+
+    async def handle(request):
+        if request.path == LOGIN:
+            data = {
+                "login": {
+                    "id": secret,
+                    "token": secret,
+                    "email": secret,
+                    "birthday": secret,
+                }
+            }
+        elif request.path == DEVICES:
+            data = {"scale": [{"tableName": secret, "userIds": [secret]}]}
+        else:
+            assert request.path == MEASUREMENTS
+            data = [{"id": secret, "timeStamp": 1710054000, "weight": 71.125}]
+        body = json.dumps({"code": 101, "data": encrypt(data)}).encode()
+        headers = {}
+        if encoding == "zstd":
+            body = zstd.ZstdCompressor().compress(body)
+            headers["Content-Encoding"] = "zstd"
+        return web.Response(body=body, headers=headers)
+
+    app = web.Application()
+    app.router.add_post("/{path:.*}", handle)
+    try:
+        async with TestServer(app) as server:
+            monkeypatch.setattr(api_module, "API_BASE", str(server.make_url("")))
+            user = await api.get_user()
+            measurement = await api.get_latest_measurement()
+        assert user.email == secret
+        assert measurement is not None
+        assert (measurement.id, measurement.weight) == (secret, 71.125)
+        assert secret not in caplog.text
+        assert '"timeStamp"' not in caplog.text
+        assert '"weight"' not in caplog.text
+    finally:
+        await api.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["device", "measurement", "schema", "transport"])
+async def test_api_boundary_sanitizes_untrusted_errors(monkeypatch, caplog, operation):
+    import logging
+    import traceback
+
+    secret = "CANARY_PROVIDER_ae09_account_health"
+    api = RenphoHealthApi("fixture", "fixture")
+    caplog.set_level(logging.DEBUG, logger="custom_components.renpho_health")
+
+    async def handle(request):
+        if operation == "schema":
+            # Missing protocol fields can cause exceptions naming untrusted keys.
+            return web.json_response({"code": 101, "data": encrypt({"login": secret})})
+        return web.json_response({"code": {"private": secret}, "msg": secret})
+
+    app = web.Application()
+    app.router.add_post("/{path:.*}", handle)
+    try:
+        async with TestServer(app) as server:
+            monkeypatch.setattr(api_module, "API_BASE", str(server.make_url("")))
+            if operation == "transport":
+                from unittest.mock import AsyncMock
+
+                monkeypatch.setattr(
+                    api, "_get_session", AsyncMock(side_effect=RuntimeError(secret))
+                )
+                action = api.authenticate()
+            elif operation == "device":
+                api._token, api._user_id = "fixture", "fixture"
+                action = api._get_device_info()
+            elif operation == "measurement":
+                api._token, api._user_id = "fixture", "fixture"
+                action = api.get_measurements(_retry=False)
+            else:
+                action = api.authenticate()
+            with pytest.raises(RenphoApiError) as caught:
+                await action
+        assert secret not in caplog.text + "".join(
+            traceback.format_exception(caught.value)
+        )
+    finally:
+        await api.close()

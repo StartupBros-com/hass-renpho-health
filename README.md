@@ -10,7 +10,6 @@ A Home Assistant integration for Renpho Health smart scales. Access your body co
 - **Body Composition Sensors**: Weight, BMI, body fat %, muscle mass, water %, bone mass
 - **Metabolic Data**: Visceral fat, BMR (Basal Metabolic Rate), body age
 - **Extended Metrics**: Protein %, subcutaneous fat, skeletal muscle
-- **No Session Conflicts**: Uses the modern Renpho Health API - won't log you out of the app
 - **Easy Setup**: Configuration through the Home Assistant UI
 
 ## Requirements
@@ -25,7 +24,7 @@ A Home Assistant integration for Renpho Health smart scales. Access your body co
 
 1. Open HACS in Home Assistant
 2. Click the three dots menu → **Custom repositories**
-3. Add `https://github.com/StartupBros/hass-renpho-health` as an **Integration**
+3. Add `https://github.com/StartupBros-com/hass-renpho-health` as an **Integration**
 4. Search for "Renpho Health" and install
 5. Restart Home Assistant
 
@@ -45,36 +44,40 @@ A Home Assistant integration for Renpho Health smart scales. Access your body co
 
 ## Sensors
 
-| Sensor | Unit | Description |
-|--------|------|-------------|
-| Weight | kg | Body weight |
-| BMI | kg/m² | Body Mass Index |
-| Body Fat | % | Body fat percentage |
-| Muscle Mass | % | Muscle mass percentage |
-| Body Water | % | Body water percentage |
-| Bone Mass | kg | Bone mass |
-| BMR | kcal/day | Basal Metabolic Rate |
-| Visceral Fat | level | Visceral fat level (1-59) |
-| Body Age | years | Metabolic body age |
-| Protein | % | Protein percentage |
-| Subcutaneous Fat | % | Subcutaneous fat percentage |
-| Skeletal Muscle | % | Skeletal muscle percentage |
+| Sensor           | Unit     | Description                 |
+| ---------------- | -------- | --------------------------- |
+| Weight           | kg       | Body weight                 |
+| BMI              | kg/m²    | Body Mass Index             |
+| Body Fat         | %        | Body fat percentage         |
+| Muscle Mass      | %        | Muscle mass percentage      |
+| Body Water       | %        | Body water percentage       |
+| Bone Mass        | kg       | Bone mass                   |
+| BMR              | kcal/day | Basal Metabolic Rate        |
+| Visceral Fat     | level    | Visceral fat level (1-59)   |
+| Body Age         | years    | Metabolic body age          |
+| Protein          | %        | Protein percentage          |
+| Subcutaneous Fat | %        | Subcutaneous fat percentage |
+| Skeletal Muscle  | %        | Skeletal muscle percentage  |
 
 ## Technical Notes
 
 - Uses the Renpho Health API (`cloud.renpho.com`), not the legacy API
-- Implements AES-128-ECB encryption for secure API communication
+- HTTPS provides transport security. Renpho additionally requires AES-128-ECB payload encoding with a protocol key embedded in the client; this is not an independent security boundary.
 - Data is polled at configurable intervals (minimum 5 minutes)
-- No data is stored permanently or sent to third parties
+- Requests send credentials and retrieve account/health data from Renpho cloud. Home Assistant persists the configured email and password in its config-entry storage; protect your configuration directory and backups.
+- Home Assistant may retain sensor history through Recorder and operational messages through logs. Review your Recorder exclusions, purge settings, log retention and backup policy for your privacy needs. This integration avoids logging account/health payloads.
 
-## Comparison to hass_renpho
+## Development and compatibility
 
-| Feature | This Integration | hass_renpho |
-|---------|-----------------|-------------|
-| API | Renpho Health (new) | Legacy Renpho |
-| Session Conflicts | None | Yes (logs you out) |
-| Last Updated | 2026 | 2024 |
-| Active Development | Yes | Limited |
+See [reproducible developer checks](tests/README.md). Fixture tests cover Home
+Assistant 2024.1.0 on Python 3.11.14 and 2026.2.3 on Python 3.13.11. These are the
+bounded tested versions, not evidence for every intervening release or a live
+Renpho account/scale installation.
+
+HACS custom-repository installation is distinct from default catalog eligibility.
+The repository currently lacks a Home Assistant brands entry;
+full HACS catalog readiness remains blocked. CI runs tests and Hassfest;
+it does not claim a passing full HACS validator.
 
 ## Credits
 
