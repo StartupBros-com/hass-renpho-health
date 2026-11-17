@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "The manifest's requirements are floors: the oldest release this integration works with, installed into Home Assistant's shared Python environment.",
+    "The org's rangeStrategy \"bump\" would raise each floor to the newest release, forcing an upgrade there for other integrations too, and #9 asked for a major.",
+    "\"replace\" leaves a >= floor alone and still updates an exact pin. The tested versions are the exact pins in tests/requirements*.txt, which Renovate keeps current."
+  ],
+  "homeassistant-manifest": {
+    "rangeStrategy": "replace"
+  },
+  "packageRules": [
+    {
+      "description": "tests/requirements-min.txt pins the oldest Home Assistant this integration supports, the minimum hacs.json and the README declare. It moves only when someone moves that minimum, in all three places.",
+      "matchFileNames": ["tests/requirements-min.txt"],
+      "matchPackageNames": ["homeassistant"],
+      "enabled": false
+    }
+  ]
+}
