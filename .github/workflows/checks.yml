@@ -8,7 +8,10 @@ permissions:
   contents: read
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: that became Ubuntu 26.04 in November 2026, and actions/setup-python
+    # has no 26.04 build of the interpreters this matrix pins (3.11.14, 3.13.11; the README's
+    # tested versions). Move to 26.04 together with a matrix move to builds that have one.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
