@@ -1,7 +1,6 @@
 """Sensor platform for Renpho Health."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -20,105 +19,85 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import RenphoHealthCoordinator
 
-
-@dataclass(frozen=True, kw_only=True)
-class RenphoSensorEntityDescription(SensorEntityDescription):
-    """Describes a Renpho sensor entity."""
-
-    value_key: str
-
-
-SENSOR_DESCRIPTIONS: tuple[RenphoSensorEntityDescription, ...] = (
-    RenphoSensorEntityDescription(
+SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
+    SensorEntityDescription(
         key="weight",
-        value_key="weight",
         translation_key="weight",
         native_unit_of_measurement=UnitOfMass.KILOGRAMS,
         device_class=SensorDeviceClass.WEIGHT,
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="bmi",
-        value_key="bmi",
         translation_key="bmi",
         native_unit_of_measurement="kg/m²",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:human",
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="bodyfat",
-        value_key="bodyfat",
         translation_key="body_fat",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:percent",
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="muscle",
-        value_key="muscle",
         translation_key="muscle_mass",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:arm-flex",
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="water",
-        value_key="water",
         translation_key="water",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:water-percent",
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="bone",
-        value_key="bone",
         translation_key="bone_mass",
         native_unit_of_measurement=UnitOfMass.KILOGRAMS,
         device_class=SensorDeviceClass.WEIGHT,
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="bmr",
-        value_key="bmr",
         translation_key="bmr",
         native_unit_of_measurement="kcal/day",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:fire",
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="visceral_fat",
-        value_key="visceral_fat",
         translation_key="visceral_fat",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:stomach",
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="body_age",
-        value_key="body_age",
         translation_key="body_age",
         native_unit_of_measurement="years",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:calendar-account",
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="protein",
-        value_key="protein",
         translation_key="protein",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:food-steak",
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="subcutaneous_fat",
-        value_key="subcutaneous_fat",
         translation_key="subcutaneous_fat",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:percent",
     ),
-    RenphoSensorEntityDescription(
+    SensorEntityDescription(
         key="skeletal_muscle",
-        value_key="skeletal_muscle",
         translation_key="skeletal_muscle",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -146,13 +125,13 @@ async def async_setup_entry(
 class RenphoHealthSensor(CoordinatorEntity[RenphoHealthCoordinator], SensorEntity):
     """Representation of a Renpho Health sensor."""
 
-    entity_description: RenphoSensorEntityDescription
+    entity_description: SensorEntityDescription
     _attr_has_entity_name = True
 
     def __init__(
         self,
         coordinator: RenphoHealthCoordinator,
-        description: RenphoSensorEntityDescription,
+        description: SensorEntityDescription,
         entry: ConfigEntry,
     ) -> None:
         """Initialize the sensor."""
@@ -172,7 +151,7 @@ class RenphoHealthSensor(CoordinatorEntity[RenphoHealthCoordinator], SensorEntit
         """Return the state of the sensor."""
         if not self.coordinator.data:
             return None
-        value = self.coordinator.data.get(self.entity_description.value_key)
+        value = self.coordinator.data.get(self.entity_description.key)
         if value is not None and isinstance(value, float):
             return round(value, 1)
         return value
@@ -183,8 +162,8 @@ class RenphoHealthSensor(CoordinatorEntity[RenphoHealthCoordinator], SensorEntit
         return (
             super().available
             and self.coordinator.data is not None
-            and self.entity_description.value_key in self.coordinator.data
-            and self.coordinator.data[self.entity_description.value_key] is not None
+            and self.entity_description.key in self.coordinator.data
+            and self.coordinator.data[self.entity_description.key] is not None
         )
 
     @property

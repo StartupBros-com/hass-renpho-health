@@ -64,6 +64,41 @@ def entry():
     )
 
 
+def test_sensor_keys_bind_stable_entity_ids_and_measurements():
+    config = entry()
+    expected = (
+        "weight", "bmi", "bodyfat", "muscle", "water", "bone", "bmr",
+        "visceral_fat", "body_age", "protein", "subcutaneous_fat", "skeletal_muscle",
+    )
+    assert tuple(description.key for description in SENSOR_DESCRIPTIONS) == expected
+    # Distinct synthetic values catch a lookup that accidentally binds another sensor.
+    data = {key: index + 0.25 for index, key in enumerate(expected)}
+    coordinator = type(
+        "Coordinator",
+        (),
+        {"data": dict(data), "last_update_success": True, "async_add_listener": None},
+    )()
+    for description in SENSOR_DESCRIPTIONS:
+        key = description.key
+        sensor = RenphoHealthSensor(coordinator, description, config)
+        assert sensor.unique_id == f"{config.entry_id}_{key}"
+        assert sensor.native_value == round(data[key], 1)
+        assert sensor.available
+
+        coordinator.data[key] = 0
+        assert sensor.native_value == 0
+        assert sensor.available
+        coordinator.data[key] = None
+        assert sensor.native_value is None
+        assert not sensor.available
+        del coordinator.data[key]
+        assert sensor.native_value is None
+        assert not sensor.available
+        coordinator.data[key] = data[key]
+        coordinator.last_update_success = False
+        assert not sensor.available
+        coordinator.last_update_success = True
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("encoding", ["plain", "zstd", SECRET])
 async def test_invalid_json_privacy(caplog, encoding):
